@@ -1,18 +1,26 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77.0.3"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "lockbox"
+name = "bouwmeester-lockbox-api"
 version = "0.1.0"
-description = "Python client for the Lockbox REST API"
+description = "Python client for the Bouwmeester Lab Lockbox REST API"
 readme = "README.md"
 requires-python = ">=3.11"
+
+license = "AGPL-3.0-only"
+license-files = ["LICENSE"]
 
 dependencies = [
     "httpx>=0.27",
     "signalrcore==1.0.2",
 ]
+
+[project.urls]
+Homepage = "https://github.com/Bouwmeester-Lab/Lockbox-PythonApi"
+Repository = "https://github.com/Bouwmeester-Lab/Lockbox-PythonApi"
+Issues = "https://github.com/Bouwmeester-Lab/Lockbox-PythonApi/issues"
 
 [project.optional-dependencies]
 dev = [
