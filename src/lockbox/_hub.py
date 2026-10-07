@@ -1,5 +1,6 @@
 """Synchronous SignalR transport adapter, without automatic reconnection."""
 
+from collections.abc import Callable
 from concurrent.futures import Future
 from threading import Event
 from uuid import uuid4
@@ -15,6 +16,7 @@ class Hub:
         self.timeout = timeout
         self._ready = Event()
         self._connected = False
+        self._close_callback: Callable[[], None] | None = None
         self._pending: dict[str, Future] = {}
         self._connection = (
             HubConnectionBuilder()
@@ -28,6 +30,9 @@ class Hub:
 
     def on(self, event, callback) -> None:
         self._connection.on(event, callback)
+
+    def on_close(self, callback: Callable[[], None]) -> None:
+        self._close_callback = callback
 
     def _opened(self) -> None:
         configure_shutdown(self._connection.transport._client)
@@ -46,6 +51,8 @@ class Hub:
             future = self._pending.pop(id, None)
             if future is not None:
                 future.set_exception(ConnectionError("SignalR connection closed"))
+        if self._close_callback is not None:
+            self._close_callback()
 
     def start(self) -> None:
         self._connection.start()

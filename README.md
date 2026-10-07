@@ -11,12 +11,12 @@ with Server("http://lockboxcontrol.internal:5106") as server:
     box = server.get_lockbox(1)  # Choose an ID from server.list_lockboxes().
     box.on_coarse_resonance_found(lambda: print("Coarse resonance found"))
     box.on_fine_resonance_found(lambda: print("Fine resonance found"))
-    box.on_lockbox_freeze_ready(lambda: print("Ready to freeze"))
+    box.on_lockbox_freeze_ready(server.stop)
 
     box.set_setpoint(0.0)
     box.set_low_high_threshold(-100, 100, SlopePreference.POSITIVE)
     box.lock()
-    input("Press Enter to close the client connections... ")
+    server.run_forever()  # Wait until freeze-ready, or press Ctrl+C.
 ```
 
 `Server` owns one HTTP client and two SignalR connections: `/Hubs/Status` for
@@ -31,6 +31,26 @@ Supply the server root URL, including any hosting path prefix, without `/api`.
 while refreshing their name, IP and MAC metadata. Objects are registered for
 status routing automatically. `connect_to_status_hub(box)` also registers manually
 created objects; repeating registration of the same object is harmless.
+
+## Keeping an experiment running
+
+Call `server.run_forever()` inside the `with` block to keep the script alive.
+It blocks the calling thread while callbacks continue on the SignalR status
+receiver thread. Call `server.stop()` from a callback or another thread to return
+from the wait. Do not call `run_forever()` inside a callback.
+
+`stop()` is idempotent and only stops waiting: it leaves connections open and
+does not change hardware state. Exiting the context closes connections. Ctrl+C
+propagates `KeyboardInterrupt`, so leaving the context also cleans up normally.
+The wait uses 0.1-second blocking intervals to stay responsive on Windows.
+
+A stop received before `run_forever()` is remembered. Subsequent waits in the
+same context return immediately; re-entering the context resets this state.
+Calling `run_forever()` outside an active context raises `RuntimeError`.
+If either hub closes unexpectedly, the wait raises `ConnectionError` identifying
+the hub, including when the disconnect happened before the wait. A recorded
+disconnect takes precedence over `stop()`. Intentional context cleanup releases
+the wait without creating a disconnect error. There is no automatic reconnection.
 
 ## Commands
 

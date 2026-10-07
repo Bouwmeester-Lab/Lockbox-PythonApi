@@ -1,4 +1,7 @@
 import json
+from concurrent.futures import Future
+from contextlib import contextmanager
+from threading import Event, Thread, get_ident
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -50,8 +53,12 @@ def environment(monkeypatch):
         def start(self):
             pass
 
+        def on_close(self, callback):
+            self.close_callback = callback
+
         def close(self):
             self.closed = True
+            self.close_callback()
 
         def invoke(self, method, arguments):
             self.calls.append((method, arguments))
@@ -328,3 +335,146 @@ def test_signalr_startup_timeout_and_no_reconnect(monkeypatch):
     with pytest.raises(TimeoutError):
         hub.start()
     hub.close()
+
+
+@contextmanager
+def running_wait(server, monkeypatch):
+    """Synchronize with a real blocking wait and never leave a test thread alive."""
+    entered, finished = Event(), Event()
+    errors = []
+    original_wait = server._stopped.wait
+
+    def wait(timeout):
+        assert timeout == 0.1
+        entered.set()
+        return original_wait(timeout)
+
+    def run():
+        try:
+            server.run_forever()
+        except ConnectionError as error:
+            errors.append(error)
+        finally:
+            finished.set()
+
+    monkeypatch.setattr(server._stopped, "wait", wait)
+    thread = Thread(target=run, daemon=True)
+    thread.start()
+    try:
+        assert entered.wait(2)
+        assert not finished.is_set()
+        yield finished, errors
+    finally:
+        server.stop()
+        thread.join(2)
+        assert not thread.is_alive()
+
+
+def test_callback_stops_wait_without_closing_connections(environment, monkeypatch):
+    with Server("http://test") as server:
+        box = server.get_lockbox(1)
+        callback_threads = []
+
+        def stop():
+            callback_threads.append(get_ident())
+            server.stop()
+
+        box.on_lockbox_freeze_ready(stop)
+        with running_wait(server, monkeypatch) as (finished, errors):
+            environment.hubs[0].handlers["ReceiveStatus"](
+                [{"arduinoId": 1, "status": "DriftEstimateReady"}]
+            )
+            assert finished.wait(2)
+            assert errors == []
+        assert callback_threads == [get_ident()]
+        assert not environment.http.is_closed
+        assert not any(h.closed for h in environment.hubs)
+        assert server._disconnect_error is None
+        assert len(environment.requests) == 1  # Only the inventory request.
+        assert not any(h.calls for h in environment.hubs)
+
+
+def test_early_stop_and_repeated_wait(environment):
+    with Server("http://test") as server:
+        server.stop()
+        server.stop()
+        assert server.run_forever() is None
+        assert server.run_forever() is None
+
+
+@pytest.mark.parametrize("hub_index,name", [(0, "Status"), (1, "Run")])
+@pytest.mark.parametrize("before_wait", [False, True])
+def test_disconnect_releases_wait(environment, monkeypatch, hub_index, name, before_wait):
+    with Server("http://test") as server:
+        if before_wait:
+            server.stop()
+            environment.hubs[hub_index].close()
+            with pytest.raises(ConnectionError, match=name):
+                server.run_forever()
+        else:
+            with running_wait(server, monkeypatch) as (finished, errors):
+                environment.hubs[hub_index].close()
+                assert finished.wait(2)
+                assert len(errors) == 1
+                assert isinstance(errors[0], ConnectionError)
+                assert name in str(errors[0])
+
+
+def test_context_exit_releases_wait_without_disconnect_error(environment, monkeypatch):
+    server = Server("http://test")
+    with server, running_wait(server, monkeypatch) as (finished, errors):
+        server.__exit__(None, None, None)
+        assert finished.wait(2)
+        assert errors == []
+        assert server._disconnect_error is None
+    assert environment.http.is_closed
+    assert all(h.closed for h in environment.hubs)
+
+
+def test_reenter_resets_stop_and_disconnect(environment, monkeypatch):
+    server = Server("http://test")
+    with server:
+        environment.hubs[0].close()
+        with pytest.raises(ConnectionError):
+            server.run_forever()
+    # Each context uses a fresh HTTP client, as the real factory does.
+    monkeypatch.setattr(client.httpx, "Client", lambda **kw: type(environment.http)(**kw))
+    with server:
+        assert server._disconnect_error is None
+        with running_wait(server, monkeypatch) as (finished, errors):
+            server.stop()
+            assert finished.wait(2)
+            assert errors == []
+
+
+def test_wait_requires_context(environment):
+    server = Server("http://test")
+    with pytest.raises(RuntimeError, match="with block"):
+        server.run_forever()
+    with server:
+        server.stop()
+    with pytest.raises(RuntimeError, match="with block"):
+        server.run_forever()
+
+
+def test_keyboard_interrupt_cleans_up(environment, monkeypatch):
+    server = Server("http://test")
+    monkeypatch.setattr(server._stopped, "wait", Mock(side_effect=KeyboardInterrupt))
+    with pytest.raises(KeyboardInterrupt), server:
+        server.run_forever()
+    assert environment.http.is_closed
+    assert all(h.closed for h in environment.hubs)
+    assert server._disconnect_error is None
+
+
+def test_hub_close_notifies_and_fails_pending_invocation():
+    hub = Hub("http://test/Hubs/Run", 0.1)
+    callback = Mock()
+    hub.on_close(callback)
+    pending = Future()
+    hub._pending["command"] = pending
+    hub._closed()
+    callback.assert_called_once_with()
+    with pytest.raises(ConnectionError, match="connection closed"):
+        pending.result()
+    assert not hub._pending

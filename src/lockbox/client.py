@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 from collections.abc import Callable
 from contextlib import ExitStack
+from threading import Event
 from typing import Self
 
 import httpx
@@ -192,10 +193,16 @@ class Server:
         self._http: httpx.Client | None = None
         self._status_hub: Hub | None = None
         self._run_hub: Hub | None = None
+        self._stopped = Event()
+        self._disconnect_error: ConnectionError | None = None
+        self._closing = True
 
     def __enter__(self) -> Self:
         if self._resources is not None:
             raise RuntimeError("Server is already open")
+        self._stopped.clear()
+        self._disconnect_error = None
+        self._closing = False
         self._resources = ExitStack()
         try:
             self._http = self._resources.enter_context(
@@ -203,10 +210,12 @@ class Server:
             )
             self._status_hub = Hub(self.url + "/Hubs/Status", self.timeout)
             self._resources.callback(self._status_hub.close)
+            self._status_hub.on_close(lambda: self._hub_closed("Status"))
             self._status_hub.on("ReceiveStatus", self._receive_status)
             self._status_hub.start()
             self._run_hub = Hub(self.url + "/Hubs/Run", self.timeout)
             self._resources.callback(self._run_hub.close)
+            self._run_hub.on_close(lambda: self._hub_closed("Run"))
             self._run_hub.start()
             return self
         except BaseException:
@@ -214,12 +223,33 @@ class Server:
             raise
 
     def __exit__(self, exc_type, exc_value, traceback) -> None:
+        self._closing = True
+        self.stop()
         resources, self._resources = self._resources, None
         try:
             if resources is not None:
                 resources.__exit__(exc_type, exc_value, traceback)
         finally:
             self._http = self._status_hub = self._run_hub = None
+
+    def run_forever(self) -> None:
+        """Wait until stopped or disconnected; callbacks run on the hub thread."""
+        if self._resources is None or self._closing:
+            raise RuntimeError("Use Server inside a with block")
+        # Bounded waits allow Ctrl+C to interrupt on Windows too.
+        while not self._stopped.wait(0.1):
+            pass
+        if self._disconnect_error is not None:
+            raise self._disconnect_error
+
+    def stop(self) -> None:
+        """Release run_forever without closing connections or changing hardware."""
+        self._stopped.set()
+
+    def _hub_closed(self, name: str) -> None:
+        if not self._closing:
+            self._disconnect_error = ConnectionError(f"SignalR {name} hub closed")
+            self.stop()
 
     def _request(self, method: str, path: str, **kwargs) -> httpx.Response:
         if self._http is None:
