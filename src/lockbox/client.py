@@ -164,7 +164,7 @@ class Lockbox:
         self._callbacks["FineResonanceFound"] = callback
 
     def on_lock_acquired(self, callback: Callback):
-        raise NotImplementedError("No dedicated lock-acquired status exists")
+        self._callbacks["Locked"] = callback
 
     def on_lock_lost(self, callback: Callback):
         self._callbacks["Unlocked"] = callback
@@ -311,6 +311,7 @@ class Server:
                 6: "FrozenDisabled",
                 7: "FrozenEnabled",
                 8: "DriftEstimateReady",
+                26: "Locked",
             }.get(status)
         callback = box._callbacks.get(status)
         if callback is not None:

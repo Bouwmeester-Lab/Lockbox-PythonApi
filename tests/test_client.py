@@ -256,9 +256,8 @@ def test_remaining_status_callbacks(environment, method, status):
 
 def test_unsupported_callbacks():
     box = Lockbox(1, "", "", "")
-    for method in (box.on_lock_acquired, box.on_lockbox_recentering):
-        with pytest.raises(NotImplementedError):
-            method(lambda: None)
+    with pytest.raises(NotImplementedError):
+        box.on_lockbox_recentering(lambda: None)
 
 
 @pytest.mark.parametrize("fail", [False, True])
@@ -370,7 +369,13 @@ def running_wait(server, monkeypatch):
         assert not thread.is_alive()
 
 
-def test_callback_stops_wait_without_closing_connections(environment, monkeypatch):
+@pytest.mark.parametrize(
+    "registration,status",
+    [("on_lockbox_freeze_ready", "DriftEstimateReady"), ("on_lock_acquired", "Locked")],
+)
+def test_callback_stops_wait_without_closing_connections(
+    environment, monkeypatch, registration, status
+):
     with Server("http://test") as server:
         box = server.get_lockbox(1)
         callback_threads = []
@@ -379,10 +384,10 @@ def test_callback_stops_wait_without_closing_connections(environment, monkeypatc
             callback_threads.append(get_ident())
             server.stop()
 
-        box.on_lockbox_freeze_ready(stop)
+        getattr(box, registration)(stop)
         with running_wait(server, monkeypatch) as (finished, errors):
             environment.hubs[0].handlers["ReceiveStatus"](
-                [{"arduinoId": 1, "status": "DriftEstimateReady"}]
+                [{"arduinoId": 1, "status": status}]
             )
             assert finished.wait(2)
             assert errors == []
@@ -400,6 +405,28 @@ def test_early_stop_and_repeated_wait(environment):
         server.stop()
         assert server.run_forever() is None
         assert server.run_forever() is None
+
+
+@pytest.mark.parametrize("status", ["Locked", 26])
+def test_lock_acquired_is_a_dedicated_device_event(environment, status):
+    with Server("http://test") as server:
+        first, second = server.list_lockboxes()
+        old, acquired, other = Mock(), Mock(), Mock()
+        first.on_lock_acquired(old)
+        first.on_lock_acquired(acquired)
+        second.on_lock_acquired(other)
+        first.lock()
+        receive = environment.hubs[0].handlers["ReceiveStatus"]
+        for unrelated in ("CoarseResonanceFound", "FineResonanceFound", "LockAttempted", 1):
+            receive([{"arduinoId": 1, "status": unrelated}])
+        receive([{"arduinoId": 99, "status": status}])
+        acquired.assert_not_called()
+        receive([{"arduinoId": 1, "status": status}])
+        acquired.assert_called_once_with()
+        other.assert_not_called()
+        old.assert_not_called()
+        receive([{"arduinoId": 2, "status": status}])
+        other.assert_called_once_with()
 
 
 @pytest.mark.parametrize("hub_index,name", [(0, "Status"), (1, "Run")])

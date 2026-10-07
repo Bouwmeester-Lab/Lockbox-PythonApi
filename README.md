@@ -11,12 +11,12 @@ with Server("http://lockboxcontrol.internal:5106") as server:
     box = server.get_lockbox(1)  # Choose an ID from server.list_lockboxes().
     box.on_coarse_resonance_found(lambda: print("Coarse resonance found"))
     box.on_fine_resonance_found(lambda: print("Fine resonance found"))
-    box.on_lockbox_freeze_ready(server.stop)
+    box.on_lock_acquired(server.stop)
 
     box.set_setpoint(0.0)
     box.set_low_high_threshold(-100, 100, SlopePreference.POSITIVE)
     box.lock()
-    server.run_forever()  # Wait until freeze-ready, or press Ctrl+C.
+    server.run_forever()  # Wait until lock is acquired, or press Ctrl+C.
 ```
 
 `Server` owns one HTTP client and two SignalR connections: `/Hubs/Status` for
@@ -111,14 +111,21 @@ zero-argument function; registering again replaces it.
 | --- | --- |
 | `on_coarse_resonance_found(callback)` | `CoarseResonanceFound` |
 | `on_fine_resonance_found(callback)` | `FineResonanceFound` |
+| `on_lock_acquired(callback)` | `Locked` |
 | `on_lock_lost(callback)` | `Unlocked` |
 | `on_lockbox_frozen(callback)` | `FrozenEnabled` |
 | `on_lockbox_unfrozen(callback)` | `FrozenDisabled` |
 | `on_lockbox_freeze_ready(callback)` | `DriftEstimateReady` |
 
-`on_lock_acquired` and `on_lockbox_recentering` raise `NotImplementedError`
-because dedicated statuses do not exist. HTTP results never trigger callbacks.
+`on_lockbox_recentering` raises `NotImplementedError` because no dedicated
+status exists. HTTP results never trigger callbacks.
 Unregistered devices and unrelated statuses are ignored.
+
+`on_lock_acquired` requires firmware and server versions supporting `Locked`
+(status 26). It reports completed acquisition and entry into feedback control;
+it does not guarantee continued lock stability. Each successful reacquisition
+emits another event. `FineResonanceFound` remains a separate event and does not
+trigger this callback. Initial startup and freeze toggles do not emit `Locked`.
 
 Functions run directly on the status receiver thread, without arguments or custom
 exception recovery. They may issue commands using the separate HTTP/Run connections.
