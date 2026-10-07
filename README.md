@@ -52,6 +52,8 @@ error message. Transport errors propagate.
 | `set_low_high_threshold(low, high, slope_preference=SlopePreference.NONE)` | Integer error-signal limits; enum values `NONE`, `NEGATIVE`, `POSITIVE` |
 | `set_fine_output_code(code)`, `set_coarse_output_code(code)` | Signed DAC codes, -524287–524287 |
 | `lock()`, `unlock()` | Normal lock; unlock without starting a scan |
+| `coarse_scan_only(lower_bound=-524287, upper_bound=524287, period_ms=0)` | Coarse-only scan; bounds in DAC codes, period in milliseconds |
+| `fine_scan_only(lower_bound=-524287, upper_bound=524287, period_ms=0)` | Fine-only scan; bounds in DAC codes, period in milliseconds |
 | `freeze()`, `unfreeze()` | Both toggle freeze through the same endpoint |
 | `reload_configuration()` | Apply the server's saved configuration |
 
@@ -63,6 +65,22 @@ depends on firmware support. This package does not change firmware.
 
 The freeze endpoint may translate a firmware rejection (including not-ready 409)
 into a server 500. The client reports the response it receives.
+
+### Scan-only operation
+
+Both scan methods use the GUI's `POST /api/Run/scan` endpoint and start a scan
+without attempting to acquire lock. A zero period leaves the device's scan period
+unchanged. All three scan parameters are sent so custom bounds are not discarded
+by the server when the period is omitted in Python.
+
+```python
+box.coarse_scan_only()  # Full DAC range, existing scan period.
+# Or select a fine-only scan with explicit bounds and timing:
+box.fine_scan_only(lower_bound=-1000, upper_bound=1000, period_ms=2000)
+```
+
+These are runtime commands: they return on HTTP success, do not wait for the scan,
+and do not save configuration. Calling the second method switches the scan mode.
 
 ## Callbacks
 

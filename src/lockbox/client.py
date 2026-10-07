@@ -106,6 +106,40 @@ class Lockbox:
     def unlock(self):
         self._command("unlock", {"scanAfter": False, "lockRequestType": "Normal"})
 
+    def coarse_scan_only(
+        self, lower_bound: int = -524287, upper_bound: int = 524287, period_ms: int = 0
+    ) -> None:
+        """Start coarse-only scanning with DAC-code bounds and a period in ms.
+
+        Zero period leaves the device's scan period unchanged.
+        """
+        self._command(
+            "scan",
+            {
+                "dac": "CoarseDac",
+                "lowerBound": lower_bound,
+                "upperBound": upper_bound,
+                "period": period_ms,
+            },
+        )
+
+    def fine_scan_only(
+        self, lower_bound: int = -524287, upper_bound: int = 524287, period_ms: int = 0
+    ) -> None:
+        """Start fine-only scanning with DAC-code bounds and a period in ms.
+
+        Zero period leaves the device's scan period unchanged.
+        """
+        self._command(
+            "scan",
+            {
+                "dac": "FineDac",
+                "lowerBound": lower_bound,
+                "upperBound": upper_bound,
+                "period": period_ms,
+            },
+        )
+
     def freeze(self):
         """Toggle freeze; enabling before ready is rejected by the server."""
         self._command("freeze", method="GET")
