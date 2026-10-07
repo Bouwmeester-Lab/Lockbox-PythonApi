@@ -7,6 +7,8 @@ from uuid import uuid4
 from signalrcore.hub_connection_builder import HubConnectionBuilder
 from signalrcore.protocol.json_hub_protocol import JsonHubProtocol
 
+from ._socket_shutdown import configure_shutdown
+
 
 class Hub:
     def __init__(self, url: str, timeout: float):
@@ -28,6 +30,7 @@ class Hub:
         self._connection.on(event, callback)
 
     def _opened(self) -> None:
+        configure_shutdown(self._connection.transport._client)
         # signalrcore 1.0.2 only starts keepalive automatically with reconnect
         # enabled. Start its ping worker independently; never reconnect.
         checker = self._connection.transport.connection_checker
