@@ -13,12 +13,14 @@ from .configuration import (
     ScanRefinerSettings,
     ScanSettings,
 )
+from .errors import LockboxHttpError
 
 __all__ = [
     "DemodulationConfiguration",
     "LockThresholdSettings",
     "Lockbox",
     "LockboxConfiguration",
+    "LockboxHttpError",
     "NotchFilter",
     "NotchFilterSelection",
     "PdhSettings",

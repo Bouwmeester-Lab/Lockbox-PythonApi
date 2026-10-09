@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 from collections.abc import Callable
 from contextlib import ExitStack
+from math import radians
 from threading import Event
 from typing import Self
 
@@ -10,6 +11,7 @@ import httpx
 
 from ._hub import Hub
 from .configuration import LockboxConfiguration, SlopePreference
+from .errors import LockboxHttpError
 
 Callback = Callable[[], None]
 
@@ -57,8 +59,12 @@ class Lockbox:
         self._command("demodulation/frequency", {"filterFrequencyHz": frequency})
 
     def set_demodulation_phase(self, phase):
-        """Set phase in radians."""
+        """Set demodulation phase in radians (e.g. pi / 2 for 90 degrees)."""
         self._command("demodulation/phase", {"phaseRadians": phase})
+
+    def set_demodulation_phase_deg(self, phase: float) -> None:
+        """Set demodulation phase in degrees, converting to radians for the API."""
+        self.set_demodulation_phase(radians(phase))
 
     def set_modulation_amplitude(self, amplitude):
         """Set modulation amplitude in DAC codes (0 through 524287)."""
@@ -264,7 +270,7 @@ class Server:
             raise RuntimeError("Use Server inside a with block")
         response = self._http.request(method, path, **kwargs)
         if not response.is_success:
-            raise Exception(response.text)  # noqa: TRY002 -- V1 exposes the response body.
+            raise LockboxHttpError(response, method, path)
         return response
 
     def _invoke(self, method: str, arguments: list) -> None:

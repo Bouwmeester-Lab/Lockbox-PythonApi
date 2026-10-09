@@ -56,7 +56,8 @@ the wait without creating a disconnect error. There is no automatic reconnection
 
 All command methods return `None` after HTTP success or Run hub invocation
 completion. They do not wait for a status or physical completion. Failed HTTP
-responses raise `Exception(response.text)`; hub errors use the server-provided
+responses raise `LockboxHttpError` with the method, path, HTTP status/reason, and
+response body in its message; hub errors use the server-provided
 error message. Transport errors propagate.
 
 | Method | Argument convention |
@@ -64,6 +65,7 @@ error message. Transport errors propagate.
 | `set_gain(gain)` | Input gain, at least 1 |
 | `set_demodulation_cutoff(frequency)` | Hz |
 | `set_demodulation_phase(phase)` | Radians |
+| `set_demodulation_phase_deg(phase)` | Degrees; converted to radians before sending |
 | `set_modulation_amplitude(amplitude)` | Integer DAC codes, 0–524287 |
 | `set_demodulation_amplitude(amplitude)` | Server amplitude scale, 0–100 |
 | `set_setpoint(setpoint)` | Native device setpoint units |
@@ -86,12 +88,43 @@ depends on firmware support. This package does not change firmware.
 
 `box.stop()` sends `POST /api/Run/stop?teensyId={id}` and `box.go()` sends
 `POST /api/Run/start?teensyId={id}`, both without a request body. They return
-on HTTP success and use the normal response-body exceptions on failure.
+on HTTP success and raise `LockboxHttpError` on failure.
 `box.stop()` stops the device; `server.stop()` only releases `run_forever()`.
 
 ```python
 box.stop()
 box.go()  # Same action as Start in the GUI.
+```
+
+Catch HTTP errors by status without parsing their message:
+
+```python
+from lockbox import LockboxHttpError
+
+try:
+    box.go()
+except LockboxHttpError as error:
+    if error.status_code == 409:
+        print("Lockbox is already running:", error)
+    else:
+        raise
+```
+
+For Stop, 409 means already stopped; for Go, it means already running.
+The updated server preserves the firmware status and message for these commands.
+Older servers may translate these errors into 400 or 500; Python reports the
+status it actually receives. `error.body` preserves the response text, and
+`error.response` exposes the original HTTP response. This replaces the previous
+body-only exception message, including for saved-configuration errors.
+
+`set_demodulation_phase()` takes **radians**. Use the degrees helper when more
+convenient; both methods send the same runtime command:
+
+```python
+import math
+
+box.set_demodulation_phase(math.pi / 2)  # 90 degrees, expressed in radians.
+box.set_demodulation_phase_deg(90)      # Equivalent command using degrees.
 ```
 
 The freeze endpoint may translate a firmware rejection (including not-ready 409)
@@ -213,7 +246,7 @@ validation is performed by the server. PDH is skipped only when both its section
 and linked ID are absent; a linked ID with a missing section is an error.
 
 **Saving is not atomic.** A failed response stops subsequent requests and raises
-`Exception(response.text)`; earlier successful writes remain saved. There is no
+`LockboxHttpError`; earlier successful writes remain saved. There is no
 rollback or retry. Other server-side validation errors can therefore leave a
 partially saved configuration. The ordinary PID update endpoint is not used
 because it also applies changes to hardware.

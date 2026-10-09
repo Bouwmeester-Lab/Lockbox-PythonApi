@@ -294,7 +294,8 @@ def test_failure_stops_saves_and_preserves_response_error(device, write):
     failures["write"] = write
     with pytest.raises(Exception) as caught:
         box.save_configuration(box.get_configuration())
-    assert str(caught.value) == "server rejected this section\n"
+    assert caught.value.body == "server rejected this section\n"
+    assert "server rejected this section\n" in str(caught.value)
     assert len(requests) == 1 + write
     assert all(request.method == "PUT" for request in requests[1:])
     assert all(
@@ -308,7 +309,8 @@ def test_missing_configuration_uses_http_error(device):
     failures["get"] = 404
     with pytest.raises(Exception) as caught:
         box.get_configuration()
-    assert json.loads(str(caught.value))["arduinoId"] == 7
+    assert caught.value.status_code == 404
+    assert json.loads(caught.value.body)["arduinoId"] == 7
     assert len(requests) == 1
 
 

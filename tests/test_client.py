@@ -1,4 +1,5 @@
 import json
+import math
 from concurrent.futures import Future
 from contextlib import contextmanager
 from threading import Event, Thread, get_ident
@@ -9,7 +10,7 @@ import httpx
 import pytest
 from signalrcore.messages.completion_message import CompletionMessage
 
-from lockbox import Lockbox, Server, SlopePreference, client
+from lockbox import Lockbox, LockboxHttpError, Server, SlopePreference, client
 from lockbox._hub import Hub
 
 
@@ -187,6 +188,20 @@ def test_http_commands(environment, name, args, verb, route, body):
         callback.assert_not_called()
 
 
+@pytest.mark.parametrize(
+    "degrees,expected", [(0, 0), (90, math.pi / 2), (-180, -math.pi), (22.5, math.pi / 8)]
+)
+def test_demodulation_phase_degrees(environment, degrees, expected):
+    with Server("http://test/prefix") as server:
+        box = server.get_lockbox(1)
+        assert box.set_demodulation_phase_deg(degrees) is None
+        request = environment.requests[-1]
+        assert request.method == "POST"
+        assert request.url.path == "/prefix/api/Run/demodulation/phase"
+        assert dict(request.url.params) == {"teensyId": "1"}
+        assert json.loads(request.content) == {"phaseRadians": pytest.approx(expected)}
+
+
 def test_run_commands_and_slope_preferences(environment):
     with Server("http://test/prefix") as server:
         box = server.get_lockbox(1)
@@ -294,9 +309,29 @@ def test_http_error_body(environment, monkeypatch, status):
         lambda *a, **kw: httpx.Response(status, text="device error\n"),
     )
     with Server("http://test") as server:
-        with pytest.raises(Exception) as caught:
+        with pytest.raises(LockboxHttpError) as caught:
             Lockbox(1, "", "", "", server).freeze()
-        assert str(caught.value) == "device error\n"
+        assert caught.value.body == "device error\n"
+        assert caught.value.status_code == status
+        assert f"HTTP {status}" in str(caught.value)
+        assert "device error\n" in str(caught.value)
+
+
+@pytest.mark.parametrize("action,route", [("stop", "stop"), ("go", "start")])
+@pytest.mark.parametrize("body", ["", "Lockbox already enabled", "Lockbox already disabled"])
+def test_stop_go_conflict_details(environment, monkeypatch, action, route, body):
+    response = httpx.Response(409, text=body)
+    monkeypatch.setattr(environment.http, "request", lambda *a, **kw: response)
+    with Server("http://test") as server:
+        with pytest.raises(LockboxHttpError) as caught:
+            getattr(Lockbox(1, "", "", "", server), action)()
+        error = caught.value
+        assert error.status_code == 409
+        assert error.response is response
+        assert error.body == body
+        assert f"POST api/Run/{route}: HTTP 409 Conflict" in str(error)
+        assert body in str(error)
+        assert not server._stopped.is_set()
 
 
 @pytest.mark.parametrize("error", [None, "threshold rejected"])
