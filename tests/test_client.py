@@ -202,6 +202,35 @@ def test_demodulation_phase_degrees(environment, degrees, expected):
         assert json.loads(request.content) == {"phaseRadians": pytest.approx(expected)}
 
 
+@pytest.mark.parametrize("method", ["try_freeze", "try_unfreeze"])
+@pytest.mark.parametrize("status", [200, 204, 409, 400, 500])
+def test_try_freeze_http_results(environment, monkeypatch, method, status):
+    request = Mock(return_value=httpx.Response(status, text="freeze response"))
+    monkeypatch.setattr(environment.http, "request", request)
+    with Server("http://test") as server:
+        box = Lockbox(1, "", "", "", server)
+        if status in (200, 204, 409):
+            assert getattr(box, method)() is (status != 409)
+        else:
+            with pytest.raises(LockboxHttpError) as caught:
+                getattr(box, method)()
+            assert caught.value.status_code == status
+            assert caught.value.body == "freeze response"
+        request.assert_called_once_with(
+            "GET", "api/Run/freeze", params={"teensyId": 1}, json=None
+        )
+
+
+@pytest.mark.parametrize("method", ["try_freeze", "try_unfreeze"])
+def test_try_freeze_propagates_transport_errors(environment, monkeypatch, method):
+    error = httpx.ConnectError("unreachable")
+    monkeypatch.setattr(environment.http, "request", Mock(side_effect=error))
+    with Server("http://test") as server:
+        with pytest.raises(httpx.ConnectError) as caught:
+            getattr(Lockbox(1, "", "", "", server), method)()
+        assert caught.value is error
+
+
 def test_run_commands_and_slope_preferences(environment):
     with Server("http://test/prefix") as server:
         box = server.get_lockbox(1)

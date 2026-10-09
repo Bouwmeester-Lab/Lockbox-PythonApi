@@ -54,7 +54,7 @@ the wait without creating a disconnect error. There is no automatic reconnection
 
 ## Commands
 
-All command methods return `None` after HTTP success or Run hub invocation
+Commands, except the boolean helpers below, return `None` after HTTP success or Run hub invocation
 completion. They do not wait for a status or physical completion. Failed HTTP
 responses raise `LockboxHttpError` with the method, path, HTTP status/reason, and
 response body in its message; hub errors use the server-provided
@@ -78,6 +78,7 @@ error message. Transport errors propagate.
 | `coarse_scan_only(lower_bound=-524287, upper_bound=524287, period_ms=0)` | Coarse-only scan; bounds in DAC codes, period in milliseconds |
 | `fine_scan_only(lower_bound=-524287, upper_bound=524287, period_ms=0)` | Fine-only scan; bounds in DAC codes, period in milliseconds |
 | `freeze()`, `unfreeze()` | Both toggle freeze through the same endpoint |
+| `try_freeze()`, `try_unfreeze()` | Same toggle; `True` on success, `False` on HTTP 409; other errors propagate |
 | `reload_configuration()` | Apply the server's saved configuration |
 
 Setters change runtime values, not saved configuration. Validation is left to
@@ -129,6 +130,19 @@ box.set_demodulation_phase_deg(90)      # Equivalent command using degrees.
 
 The freeze endpoint may translate a firmware rejection (including not-ready 409)
 into a server 500. The client reports the response it receives.
+
+`try_freeze()` and `try_unfreeze()` return `True` on HTTP success and `False`
+only when the server responds with HTTP 409. Other HTTP errors and transport
+errors still raise exceptions, including a firmware conflict translated to 500
+by the server. Both methods toggle freeze, just like `freeze()` and `unfreeze()`;
+they do not track frozen state or wait for a status callback.
+
+```python
+if box.try_freeze():
+    print("Freeze toggle accepted")
+else:
+    print("Freeze toggle rejected with HTTP 409")
+```
 
 ### Scan-only operation
 

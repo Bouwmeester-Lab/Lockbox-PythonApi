@@ -163,6 +163,20 @@ class Lockbox:
         """Toggle freeze using the same endpoint as freeze()."""
         self.freeze()
 
+    def try_freeze(self) -> bool:
+        """Toggle freeze; return False only on HTTP 409, raising other errors."""
+        try:
+            self.freeze()
+        except LockboxHttpError as error:
+            if error.status_code == 409:
+                return False
+            raise
+        return True
+
+    def try_unfreeze(self) -> bool:
+        """Use the same freeze toggle and boolean result as try_freeze()."""
+        return self.try_freeze()
+
     ### dac controls
     def set_fine_output_code(self, voltage_code):
         self._command("voltage", {"dac": "FineDac", "voltage": voltage_code})
