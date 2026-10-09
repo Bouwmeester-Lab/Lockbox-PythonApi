@@ -97,6 +97,14 @@ class Lockbox:
         )
 
     ### actions
+    def stop(self) -> None:
+        """Stop the device, matching the GUI Stop action."""
+        self._command("stop")
+
+    def go(self) -> None:
+        """Run the device, matching the GUI Start action."""
+        self._command("start")
+
     def reload_configuration(self):
         """Reapply the server's saved configuration to the device."""
         self._command("configuration", method="GET")

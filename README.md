@@ -72,6 +72,7 @@ error message. Transport errors propagate.
 | `set_low_high_threshold(low, high, slope_preference=SlopePreference.NONE)` | Integer error-signal limits; enum values `NONE`, `NEGATIVE`, `POSITIVE` |
 | `set_fine_output_code(code)`, `set_coarse_output_code(code)` | Signed DAC codes, -524287–524287 |
 | `lock()`, `unlock()` | Normal lock; unlock without starting a scan |
+| `stop()`, `go()` | Stop or run the device, matching GUI Stop/Start |
 | `coarse_scan_only(lower_bound=-524287, upper_bound=524287, period_ms=0)` | Coarse-only scan; bounds in DAC codes, period in milliseconds |
 | `fine_scan_only(lower_bound=-524287, upper_bound=524287, period_ms=0)` | Fine-only scan; bounds in DAC codes, period in milliseconds |
 | `freeze()`, `unfreeze()` | Both toggle freeze through the same endpoint |
@@ -82,6 +83,16 @@ the server, except conversion of the slope enum. Slope preference is forwarded
 as the server enum value (0, 1, or 2). The current firmware `ThresholdsEndpoint`
 updates limits but does not read the slope query parameter; actual slope behavior
 depends on firmware support. This package does not change firmware.
+
+`box.stop()` sends `POST /api/Run/stop?teensyId={id}` and `box.go()` sends
+`POST /api/Run/start?teensyId={id}`, both without a request body. They return
+on HTTP success and use the normal response-body exceptions on failure.
+`box.stop()` stops the device; `server.stop()` only releases `run_forever()`.
+
+```python
+box.stop()
+box.go()  # Same action as Start in the GUI.
+```
 
 The freeze endpoint may translate a firmware rejection (including not-ready 409)
 into a server 500. The client reports the response it receives.

@@ -95,6 +95,8 @@ def environment(monkeypatch):
         ),
         ("set_pid", (1, 2, 3), "POST", "pid", {"p": 1, "i": 2, "d": 3}),
         ("reload_configuration", (), "GET", "configuration", None),
+        ("stop", (), "POST", "stop", None),
+        ("go", (), "POST", "start", None),
         ("lock", (), "POST", "lock", {"lockRequestType": "Normal"}),
         (
             "coarse_scan_only",
